@@ -4,18 +4,17 @@ import warnings
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.metrics import mean_squared_error
 
 warnings.filterwarnings("ignore")
 
+# Se eliminó SARIMA de la lista
 METODOS_PRONOSTICO = [
     "Naive",
     "Promedio móvil",
     "SES",
     "Regresión lineal",
     "ARIMA",
-    "SARIMA",
     "Holt-Winters",
     "Croston",
 ]
@@ -90,7 +89,6 @@ def forecast_arima(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarra
     if len(serie) < 6:
         return forecast_ses(serie, pasos_futuros)
     try:
-        # Se flexibilizan las restricciones para evitar que falle en series cortas
         modelo = ARIMA(serie, order=(1, 1, 0), enforce_stationarity=False, enforce_invertibility=False)
         ajuste = modelo.fit()
         pred_hist = np.asarray(ajuste.fittedvalues)
@@ -98,18 +96,6 @@ def forecast_arima(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarra
         return asegurar_prediccion_valida(pred_hist, serie), np.maximum(0, pred_future)
     except Exception:
         return forecast_ses(serie, pasos_futuros)
-
-def forecast_sarima(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    if len(serie) < 18:
-        return forecast_arima(serie, pasos_futuros)
-    try:
-        modelo = SARIMAX(serie, order=(1, 1, 0), seasonal_order=(1, 0, 0, 12), enforce_stationarity=False, enforce_invertibility=False)
-        ajuste = modelo.fit(disp=False)
-        pred_hist = np.asarray(ajuste.fittedvalues)
-        pred_future = np.asarray(ajuste.forecast(pasos_futuros)) if pasos_futuros > 0 else np.array([])
-        return asegurar_prediccion_valida(pred_hist, serie), np.maximum(0, pred_future)
-    except Exception:
-        return forecast_arima(serie, pasos_futuros)
 
 def forecast_holt_winters(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
     if len(serie) < 18:
@@ -164,8 +150,6 @@ def aplicar_metodo_pronostico(serie: np.ndarray, metodo: str, pasos_futuros: int
         return forecast_regresion(serie, pasos_futuros)
     if metodo == "ARIMA":
         return forecast_arima(serie, pasos_futuros)
-    if metodo == "SARIMA":
-        return forecast_sarima(serie, pasos_futuros)
     if metodo == "Holt-Winters":
         return forecast_holt_winters(serie, pasos_futuros)
     if metodo == "Croston":
@@ -173,7 +157,6 @@ def aplicar_metodo_pronostico(serie: np.ndarray, metodo: str, pasos_futuros: int
     return forecast_ses(serie, pasos_futuros)
 
 def calcular_errores(y_real, y_pred) -> dict:
-    """Calcula errores añadiendo RMSE para penalizar desviaciones grandes (útil para Tesis)"""
     y_real = np.asarray(y_real, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     suma_real = y_real.sum()
@@ -206,7 +189,6 @@ def generar_fechas_futuras(ultima_fecha, pasos_futuros: int) -> pd.DatetimeIndex
     )
 
 def generar_forecast(df: pd.DataFrame, metodo: str, fecha_fin_pronostico=None) -> pd.DataFrame:
-    # Esta función se mantiene para el cálculo manual
     resultados = []
     pasos_futuros, _ = calcular_meses_futuros(df, fecha_fin_pronostico) if fecha_fin_pronostico is not None else (0, None)
     for producto, sub in df.groupby("product_id"):
@@ -238,10 +220,6 @@ def generar_forecast(df: pd.DataFrame, metodo: str, fecha_fin_pronostico=None) -
     return pd.concat(resultados, ignore_index=True)
 
 def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=None):
-    """
-    Mejora metodológica: Utiliza Validación Cruzada (Hold-out) para elegir el mejor modelo.
-    Se entrena con el (N - horizon) y se evalúa el error en los últimos meses reales.
-    """
     forecasts_finales = []
     comparacion = []
     pasos_futuros, _ = calcular_meses_futuros(df, fecha_fin_pronostico) if fecha_fin_pronostico is not None else (0, None)
@@ -250,12 +228,10 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
         sub = sub.sort_values("date").copy()
         serie = sub["demand_real"].to_numpy(dtype=float)
         
-        # --- NUEVA LÓGICA DE VALIDACIÓN (TRAIN/TEST SPLIT) ---
         n_total = len(serie)
-        # Separamos el 20% final de los datos para prueba (mínimo 2 meses, máximo 6 meses)
         horizonte_test = max(2, min(6, int(n_total * 0.2))) 
         
-        if n_total > horizonte_test * 2: # Solo si hay suficientes datos
+        if n_total > horizonte_test * 2: 
             train = serie[:-horizonte_test]
             test = serie[-horizonte_test:]
         else:
@@ -268,15 +244,13 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
         filas_producto = []
 
         for metodo in METODOS_PRONOSTICO:
-            # 1. Evaluar el modelo usando SOLO los datos de entrenamiento para predecir el test
             if horizonte_test > 0:
                 _, pred_test = aplicar_metodo_pronostico(train, metodo, pasos_futuros=horizonte_test)
-                err = calcular_errores(test, pred_test) # Medimos error sobre datos NO VISTOS
+                err = calcular_errores(test, pred_test) 
             else:
                 pred_hist_full, _ = aplicar_metodo_pronostico(serie, metodo, 0)
                 err = calcular_errores(serie, pred_hist_full)
 
-            # 2. Una vez calculado el error real, entrenamos el modelo con TODA la data para el pronóstico final
             pred_hist, pred_future = aplicar_metodo_pronostico(serie, metodo, pasos_futuros)
             
             predicciones_hist[metodo] = pred_hist
@@ -289,12 +263,11 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
                 "Bias": err["Bias"],
                 "Abs_Bias": abs(err["Bias"]),
                 "MAE": err["MAE"],
-                "RMSE": err["RMSE"] # Nueva métrica
+                "RMSE": err["RMSE"]
             }
             comparacion.append(fila)
             filas_producto.append(fila)
 
-        # Selección del mejor modelo penalizando errores extremos (Prioridad: wMAPE -> RMSE -> Bias)
         comp_producto = pd.DataFrame(filas_producto)
         mejor_fila = comp_producto.sort_values(["wMAPE", "RMSE", "Abs_Bias"]).iloc[0]
         mejor_metodo = mejor_fila["Método"]
