@@ -62,6 +62,13 @@ def forecast_promedio_movil(serie: np.ndarray, pasos_futuros: int = 0, ventana: 
 def forecast_regresion(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
     if len(serie) == 0:
         return np.array([]), np.array([])
+        
+    # MEJORA PARA TESIS: Restricción de tamaño de muestra
+    # Si hay menos de 12 meses de datos, una regresión lineal es estadísticamente inestable.
+    # Por lo tanto, el sistema hace un "Fallback" automático a Suavización Exponencial (SES).
+    if len(serie) < 12:
+        return forecast_ses(serie, pasos_futuros)
+
     x = np.arange(len(serie)).reshape(-1, 1)
     modelo = LinearRegression()
     modelo.fit(x, serie)
@@ -70,6 +77,13 @@ def forecast_regresion(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.nd
     if pasos_futuros > 0:
         x_future = np.arange(len(serie), len(serie) + pasos_futuros).reshape(-1, 1)
         pred_future = modelo.predict(x_future)
+        
+        # FRENO DE SEGURIDAD (CAP DE DEMANDA): 
+        # Evita proyecciones agresivas al infinito. La proyección futura nunca 
+        # debe superar el 150% (1.5x) del valor máximo histórico registrado.
+        max_historico = np.max(serie)
+        limite_superior = max_historico * 1.5 
+        pred_future = np.clip(pred_future, a_min=0, a_max=limite_superior)
     else:
         pred_future = np.array([])
 
