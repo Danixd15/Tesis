@@ -284,7 +284,7 @@ with tab1:
         file_name="mejor_metodo_por_producto.csv",
         mime="text/csv",
     )
-    
+
 with tab2:
     st.subheader("📊 Análisis de Demanda y Proyección")
     st.write("Visualización del comportamiento histórico frente al modelo de pronóstico seleccionado.")
