@@ -416,31 +416,111 @@ with tab4:
     )
     
 with tab5:
-    st.subheader("Tablas de resultados")
-    st.write("Comparación completa de métodos")
-    st.dataframe(formatear_comparacion(df_comparacion), use_container_width=True, hide_index=True)
+    st.subheader("📋 Tablas de Datos y Reportes")
+    st.write("Registros detallados de las proyecciones y simulaciones, formateados para exportación y análisis externo.")
 
-    st.write("Datos mensuales históricos y pronóstico futuro elegido")
-    st.dataframe(sub_forecast, use_container_width=True, hide_index=True)
+    # -------------------------------------------------------------
+    # 1. Tabla: Histórico y Pronóstico
+    # -------------------------------------------------------------
+    st.markdown("#### 📅 Datos Históricos y Pronóstico Futuro")
+    
+    # Copia para no alterar el original
+    df_fore_disp = sub_forecast.copy()
+    
+    # Formateo de fechas y números
+    df_fore_disp["date"] = pd.to_datetime(df_fore_disp["date"]).dt.strftime('%b %Y').str.upper()
+    df_fore_disp["demand_real"] = df_fore_disp["demand_real"].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "")
+    df_fore_disp["demand_forecast"] = df_fore_disp["demand_forecast"].apply(lambda x: f"{x:,.0f}")
+    df_fore_disp["method_wmape"] = df_fore_disp["method_wmape"].apply(lambda x: f"{x:.2%}")
+    df_fore_disp["method_bias"] = df_fore_disp["method_bias"].apply(lambda x: f"{x:.2%}")
+    
+    # Renombrar columnas
+    df_fore_disp.columns = [
+        "Fecha", "Producto", "Demanda Real", "Pronóstico", 
+        "Método Usado", "wMAPE", "Bias", "Tipo de Período"
+    ]
+    
+    st.dataframe(df_fore_disp, use_container_width=True, hide_index=True)
 
-    st.write("Simulación mensual")
-    st.dataframe(sub_sim, use_container_width=True, hide_index=True)
+    # -------------------------------------------------------------
+    # 2. Tabla: Simulación Mes a Mes
+    # -------------------------------------------------------------
+    st.markdown("#### 📦 Registro Mensual de la Simulación de Inventario")
+    
+    df_sim_disp = sub_sim.copy()
+    df_sim_disp["date"] = pd.to_datetime(df_sim_disp["date"]).dt.strftime('%b %Y').str.upper()
+    
+    # Seleccionar columnas clave y renombrarlas
+    df_sim_disp = df_sim_disp[[
+        "date", "demand_real", "demand_forecast", "inventory_level", 
+        "order_placed", "arrivals", "sales_lost", "reorder_point_s"
+    ]]
+    df_sim_disp.columns = [
+        "Mes", "Demanda Real", "Pronóstico", "Inventario Final", 
+        "Pedido Generado", "Llegadas (Recepción)", "Ventas Perdidas", "Punto Reorden (s)"
+    ]
+    
+    # Redondear todo a enteros
+    for col in df_sim_disp.columns[1:]:
+        df_sim_disp[col] = df_sim_disp[col].apply(lambda x: f"{x:,.0f}")
+        
+    st.dataframe(df_sim_disp, use_container_width=True, hide_index=True)
 
-    st.write("Resultados de optimización")
-    st.dataframe(sub_opt, use_container_width=True, hide_index=True)
-
-    csv = sub_sim.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Descargar simulación mensual en CSV",
-        data=csv,
-        file_name=f"simulacion_mensual_{producto_sel}.csv",
-        mime="text/csv",
+    # -------------------------------------------------------------
+    # 3. Tabla: Escenarios de Optimización
+    # -------------------------------------------------------------
+    st.markdown("#### 🎯 Resultados de la Optimización de Stock de Seguridad")
+    
+    df_opt_disp = sub_opt.copy()
+    df_opt_disp.columns = [
+        "Meses SS", "Fill Rate", "Inv. Promedio", "Ventas Perdidas", "Meses Quiebre",
+        "Total Órdenes", "Costo Órdenes (S/)", "Costo Almacenaje (S/)", "Costo Quiebre (S/)", "Costo Total (S/)"
+    ]
+    
+    # Formato financiero y de porcentajes
+    st.dataframe(
+        df_opt_disp.style.format({
+            "Fill Rate": "{:.2%}",
+            "Inv. Promedio": "{:,.0f}",
+            "Ventas Perdidas": "{:,.0f}",
+            "Meses Quiebre": "{:.0f}",
+            "Total Órdenes": "{:.0f}",
+            "Costo Órdenes (S/)": "{:,.2f}",
+            "Costo Almacenaje (S/)": "{:,.2f}",
+            "Costo Quiebre (S/)": "{:,.2f}",
+            "Costo Total (S/)": "{:,.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
     )
 
-    csv_comparacion = df_comparacion.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Descargar comparación de métodos en CSV",
-        data=csv_comparacion,
-        file_name="comparacion_metodos_pronostico.csv",
-        mime="text/csv",
-    )
+    # -------------------------------------------------------------
+    # Botones de Descarga en Columnas
+    # -------------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_d1, col_d2, col_d3 = st.columns(3)
+    
+    with col_d1:
+        st.download_button(
+            label="📥 Descargar Pronóstico (CSV)",
+            data=sub_forecast.to_csv(index=False).encode("utf-8"),
+            file_name=f"pronostico_{producto_sel}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with col_d2:
+        st.download_button(
+            label="📥 Descargar Simulación (CSV)",
+            data=sub_sim.to_csv(index=False).encode("utf-8"),
+            file_name=f"simulacion_{producto_sel}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with col_d3:
+        st.download_button(
+            label="📥 Descargar Comparativa Métodos (CSV)",
+            data=df_comparacion.to_csv(index=False).encode("utf-8"),
+            file_name="comparacion_metodos_portafolio.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
