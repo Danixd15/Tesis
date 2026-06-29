@@ -323,15 +323,45 @@ with tab2:
         use_container_width=True,
         hide_index=True
     )
-    
+
 with tab3:
-    st.subheader("Simulación mensual de inventario")
+    st.subheader("📦 Simulación Dinámica de Inventario")
+    st.write("Evolución del stock físico frente a la demanda y generación de órdenes de compra según la política seleccionada.")
+
+    # 1. Gráfico mejorado ocupando todo el ancho
     st.plotly_chart(grafico_inventario(sub_sim), use_container_width=True)
 
-    st.write("KPIs de la simulación")
-    kpi_df = pd.DataFrame([kpis]).T.reset_index()
-    kpi_df.columns = ["Indicador", "Valor"]
-    st.dataframe(kpi_df, use_container_width=True, hide_index=True)
+    st.markdown("---")
+    st.subheader("📊 Indicadores de Desempeño (KPIs) del Escenario Actual")
+    
+    # 2. Panel de Control (Dashboard) con columnas en lugar de una tabla cruda
+    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+    
+    with col_kpi1:
+        st.markdown("**Nivel de Servicio**")
+        fill_rate_val = kpis['fill_rate']
+        st.metric("Fill Rate", f"{fill_rate_val:.2%}")
+        # Barra de progreso visual para el Fill Rate
+        st.progress(min(fill_rate_val, 1.0))
+        if fill_rate_val < 0.90:
+            st.error(f"¡Atención! Ventas perdidas: {int(kpis['lost_sales_units'])} unds.")
+        else:
+            st.success("Nivel de servicio óptimo.")
+
+    with col_kpi2:
+        st.markdown("**Operaciones de Almacén**")
+        st.metric("Inventario Promedio", f"{kpis['avg_inventory']:,.0f} unds")
+        st.metric("Órdenes Emitidas", f"{kpis['orders']} pedidos")
+        st.metric("Meses con Quiebre", f"{kpis['stockout_months']} meses")
+
+    with col_kpi3:
+        st.markdown("**Análisis Financiero**")
+        st.metric("Costo de Mantener", f"S/ {kpis['holding_cost']:,.2f}")
+        st.metric("Costo de Quiebre (Penalidad)", f"S/ {kpis['stockout_cost']:,.2f}")
+        st.metric("Costo de Ordenar", f"S/ {kpis['ordering_cost']:,.2f}")
+        
+    # Resaltar el Costo Total
+    st.info(f"**Costo Total de la Política Actual:** S/ {kpis['total_cost']:,.2f}")
 
 with tab4:
     st.subheader("Optimización de stock de seguridad mensual")
