@@ -62,45 +62,83 @@ def grafico_forecast(df_producto: pd.DataFrame) -> go.Figure:
     )
     return fig
 
-
 def grafico_inventario(df_sim: pd.DataFrame) -> go.Figure:
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
+    # 1. Nivel de Inventario (Línea principal)
     fig.add_trace(
-        go.Scatter(x=df_sim["date"], y=df_sim["inventory_level"], name="Inventario", mode="lines+markers"),
+        go.Scatter(
+            x=df_sim["date"], 
+            y=df_sim["inventory_level"], 
+            name="Inventario Físico", 
+            mode="lines+markers",
+            line=dict(color="#1f77b4", width=2),
+            marker=dict(size=6)
+        ),
         secondary_y=False,
     )
+    
+    # 2. Punto de Reorden (Línea de alerta)
     fig.add_trace(
         go.Scatter(
             x=df_sim["date"],
             y=df_sim["reorder_point_s"],
-            name="Punto s",
+            name="Punto de Reorden (s)",
             mode="lines",
-            line={"dash": "dot"},
+            line=dict(color="#d62728", dash="dot", width=2), # Rojo punteado para denotar peligro/alerta
         ),
         secondary_y=False,
     )
+    
+    # 3. Demanda Mensual (Barras de fondo)
     fig.add_trace(
-        go.Bar(x=df_sim["date"], y=df_sim["demand_real"], name="Demanda mensual", opacity=0.35),
+        go.Bar(
+            x=df_sim["date"], 
+            y=df_sim["demand_real"], 
+            name="Demanda Real", 
+            marker_color="#b3cde3", 
+            opacity=0.6
+        ),
         secondary_y=True,
     )
 
+    # 4. Pedidos Generados (Marcadores destacados)
     pedidos = df_sim[df_sim["order_placed"] > 0]
     fig.add_trace(
         go.Scatter(
             x=pedidos["date"],
             y=pedidos["order_placed"],
-            name="Pedido generado",
+            name="Pedido Generado",
             mode="markers",
-            marker={"size": 10, "symbol": "triangle-up"},
+            marker=dict(
+                size=12, 
+                symbol="triangle-up", 
+                color="#ff7f0e", 
+                line=dict(width=1, color="DarkSlateGrey")
+            ),
         ),
         secondary_y=True,
     )
 
-    fig.update_layout(title="Simulación mensual de inventario", hovermode="x unified")
-    fig.update_yaxes(title_text="Inventario", secondary_y=False)
-    fig.update_yaxes(title_text="Demanda / Pedidos", secondary_y=True)
+    # Ajustes de diseño y eliminación de título redundante
+    fig.update_layout(
+        template="plotly_white",
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=20, b=20),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5
+        )
+    )
+    
+    fig.update_yaxes(title_text="Unidades en Inventario", secondary_y=False)
+    fig.update_yaxes(title_text="Demanda / Tamaño de Pedido", secondary_y=True, showgrid=False)
+    
     return fig
+    
 
 def grafico_tradeoff(df_opt: pd.DataFrame) -> go.Figure:
     mejor = df_opt.loc[df_opt["total_cost"].idxmin()]
