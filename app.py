@@ -94,21 +94,65 @@ else:
 # =========================================================
 # NUEVA SECCIÓN: LECTURA DEL MAESTRO DE ARTÍCULOS
 # =========================================================
-st.sidebar.header("3. Parámetros de Inventario")
-archivo_params = st.sidebar.file_uploader("Sube el Excel Maestro de Artículos (Costos, Lead Times, etc.)", type=["csv", "xlsx", "xls"])
+st.sidebar.header("1. Carga de datos")
+modo_datos = st.sidebar.radio("Modo de datos", ["Generar datos sintéticos", "Subir Excel"])
 
-if archivo_params is None:
-    st.warning("⚠️ Por favor, sube el Excel con los parámetros (GRUPO DE DEMANDA, initial_stock, costos, etc.) para realizar la simulación.")
-    st.stop()
+df_parametros = None
 
-# Leer el excel de parámetros
-try:
-    df_parametros = pd.read_excel(archivo_params)
-except Exception as e:
+if modo_datos == "Generar datos sintéticos":
+    n_productos = st.sidebar.slider("Número de productos", 1, 50, 5)
+    meses = st.sidebar.slider("Meses de historial", 12, 84, 36)
+    seed = st.sidebar.number_input("Semilla", min_value=1, max_value=9999, value=42)
+
+    df_real = generar_demanda_sintetica(
+        n_productos=n_productos,
+        meses=meses,
+        seed=seed
+    )
+
+    # Parámetros por defecto para pruebas con datos sintéticos
+    productos_sinteticos = sorted(df_real["product_id"].unique())
+    df_parametros = pd.DataFrame({
+        "product_id": productos_sinteticos,
+        "initial_stock": 1000,
+        "lead_time_mo": 1,
+        "review_period": 1,
+        "ss_months": 1,
+        "q_fixed": 1000,
+        "lot_size": 1,
+        "cost_order": 200,
+        "cost_holding_month": 1.5,
+        "cost_stockout": 500,
+        "tvu_months": 12,
+        "unit_value": 1,
+    })
+
+else:
+    archivo = st.sidebar.file_uploader(
+        "Sube tu Excel con hojas Demanda y Datos",
+        type=["xlsx", "xls"]
+    )
+
+    if archivo is None:
+        st.info(
+            "Sube un Excel con dos hojas: 'Demanda' y 'Datos'. "
+            "La hoja Demanda debe tener date, product_id y demand_real."
+        )
+        st.stop()
+
     try:
-        df_parametros = pd.read_csv(archivo_params)
-    except:
-        st.error("Error al leer el archivo de parámetros. Asegúrate de que sea Excel o CSV.")
+        # Leer hoja Demanda usando datos.py
+        df_real = leer_archivo_subido(archivo)
+
+        # Volver al inicio del archivo para leer la segunda hoja
+        archivo.seek(0)
+
+        # Leer hoja Datos para parámetros de inventario
+        df_parametros = pd.read_excel(archivo, sheet_name="Datos")
+
+    except Exception as e:
+        st.error("Error al leer el archivo. Verifica que existan las hojas 'Demanda' y 'Datos'.")
+        st.exception(e)
         st.stop()
 
 politica = st.sidebar.selectbox(
@@ -128,11 +172,18 @@ parametros_del_producto = obtener_parametros_producto(df_parametros, producto_se
 # =========================================================
 # CONTENIDO PRINCIPAL
 # =========================================================
+
 sub_forecast = df_forecast[df_forecast["product_id"] == producto_sel].copy()
 metodo_usado = sub_forecast["method_used"].iloc[0]
-
-# Le pasamos los parámetros dinámicos a la simulación
-sub_sim = simular_producto(sub_forecast, politica, parametros_del_producto)
+# Para simulación se usa solo el horizonte futuro
+sub_forecast_sim = sub_forecast[
+    sub_forecast["tipo_periodo"] == "Pronóstico futuro"
+].copy()
+if sub_forecast_sim.empty:
+    st.warning("No hay meses futuros para simular. Selecciona una fecha de pronóstico mayor a la última fecha histórica.")
+    st.stop()
+parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
+sub_sim = simular_producto(sub_forecast_sim, politica, parametros_del_producto)
 kpis = calcular_kpis(sub_sim, parametros_del_producto)
 sub_opt = optimizar_stock_seguridad(sub_forecast, politica, parametros_del_producto, ss_max=ss_max)
 mejor = sub_opt.loc[sub_opt["total_cost"].idxmin()]
