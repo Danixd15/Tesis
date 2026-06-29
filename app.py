@@ -364,25 +364,57 @@ with tab3:
     st.info(f"**Costo Total de la Política Actual:** S/ {kpis['total_cost']:,.2f}")
 
 with tab4:
-    st.subheader("Optimización de stock de seguridad mensual")
-    st.info(
-        f"Para el producto {producto_sel}, usando el método de pronóstico {metodo_usado}, "
-        f"el stock de seguridad óptimo encontrado es {int(mejor['ss_months'])} meses, "
-        f"con costo total aproximado de S/ {mejor['total_cost']:,.2f}."
+    st.subheader("🎯 Optimización Financiera del Stock de Seguridad")
+    st.write(
+        "Análisis de sensibilidad (Trade-off) para encontrar el equilibrio exacto entre "
+        "el costo de mantener inventario inmovilizado y la penalidad por ventas perdidas."
     )
+    
+    # 1. Mensaje destacado con la recomendación óptima
+    st.success(
+        f"**Recomendación del Sistema:** Para el producto {producto_sel}, el stock de seguridad óptimo "
+        f"es **{int(mejor['ss_months'])} meses**. \n\n"
+        f"Esta configuración proyecta un Costo Total mínimo de **S/ {mejor['total_cost']:,.2f}** "
+        f"alcanzando un Nivel de Servicio (Fill Rate) del **{mejor['fill_rate']:.2%}**."
+    )
+
+    # 2. El nuevo gráfico consolidado de doble eje
     st.plotly_chart(grafico_tradeoff(sub_opt), use_container_width=True)
 
-    fig_servicio = px.line(
-        sub_opt,
-        x="ss_months",
-        y="fill_rate",
-        markers=True,
-        title="Nivel de servicio según meses de stock de seguridad",
-        labels={"ss_months": "Meses de stock de seguridad", "fill_rate": "Fill rate"},
-    )
-    fig_servicio.update_yaxes(tickformat=".0%")
-    st.plotly_chart(fig_servicio, use_container_width=True)
+    st.markdown("---")
+    st.markdown("### 📋 Tabla de Sensibilidad de Escenarios")
+    
+    # 3. Formatear la tabla para que sea presentable a gerencia
+    df_sensibilidad = sub_opt.copy()
+    
+    # Seleccionamos y renombramos las columnas clave
+    df_sensibilidad = df_sensibilidad[[
+        "ss_months", "fill_rate", "lost_sales_units", 
+        "holding_cost", "stockout_cost", "total_cost"
+    ]]
+    df_sensibilidad.columns = [
+        "Meses SS", "Fill Rate", "Ventas Perdidas (Unds)", 
+        "Costo Mantener (S/)", "Costo Quiebre (S/)", "Costo Total (S/)"
+    ]
+    
+    # Función para resaltar la fila óptima en la tabla
+    def highlight_optimo(row):
+        is_optimo = row["Meses SS"] == int(mejor["ss_months"])
+        return ['background-color: #d4edda; font-weight: bold' if is_optimo else '' for _ in row]
 
+    st.dataframe(
+        df_sensibilidad.style.apply(highlight_optimo, axis=1)
+        .format({
+            "Fill Rate": "{:.2%}",
+            "Ventas Perdidas (Unds)": "{:,.0f}",
+            "Costo Mantener (S/)": "{:,.2f}",
+            "Costo Quiebre (S/)": "{:,.2f}",
+            "Costo Total (S/)": "{:,.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+    
 with tab5:
     st.subheader("Tablas de resultados")
     st.write("Comparación completa de métodos")
