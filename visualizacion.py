@@ -143,21 +143,87 @@ def grafico_inventario(df_sim: pd.DataFrame) -> go.Figure:
 def grafico_tradeoff(df_opt: pd.DataFrame) -> go.Figure:
     mejor = df_opt.loc[df_opt["total_cost"].idxmin()]
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_opt["ss_months"], y=df_opt["total_cost"], mode="lines+markers", name="Costo total"))
-    fig.add_trace(go.Scatter(x=df_opt["ss_months"], y=df_opt["holding_cost"], mode="lines", name="Costo mantener"))
-    fig.add_trace(go.Scatter(x=df_opt["ss_months"], y=df_opt["stockout_cost"], mode="lines", name="Costo quiebre"))
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # 1. Fill Rate (Nivel de Servicio) en el eje secundario (Área sombreada al fondo)
+    fig.add_trace(
+        go.Scatter(
+            x=df_opt["ss_months"], 
+            y=df_opt["fill_rate"], 
+            mode="lines", 
+            name="Nivel de Servicio (Fill Rate)",
+            fill='tozeroy',
+            line=dict(color="rgba(44, 160, 44, 0.2)", width=0), # Verde muy transparente
+            fillcolor="rgba(44, 160, 44, 0.1)"
+        ),
+        secondary_y=True,
+    )
+
+    # 2. Costo de Mantener (Sube con el SS)
+    fig.add_trace(
+        go.Scatter(
+            x=df_opt["ss_months"], 
+            y=df_opt["holding_cost"], 
+            mode="lines", 
+            name="Costo de Mantener",
+            line=dict(color="#1f77b4", dash="dash") # Azul punteado
+        ),
+        secondary_y=False,
+    )
+
+    # 3. Costo de Quiebre (Baja con el SS)
+    fig.add_trace(
+        go.Scatter(
+            x=df_opt["ss_months"], 
+            y=df_opt["stockout_cost"], 
+            mode="lines", 
+            name="Costo por Quiebre",
+            line=dict(color="#d62728", dash="dash") # Rojo punteado
+        ),
+        secondary_y=False,
+    )
+
+    # 4. Costo Total (La curva en forma de U)
+    fig.add_trace(
+        go.Scatter(
+            x=df_opt["ss_months"], 
+            y=df_opt["total_cost"], 
+            mode="lines+markers", 
+            name="Costo Total",
+            line=dict(color="#2ca02c", width=3), # Verde fuerte
+            marker=dict(size=8)
+        ),
+        secondary_y=False,
+    )
+
+    # 5. Línea vertical marcando el Óptimo
     fig.add_vline(
         x=int(mejor["ss_months"]),
-        line_dash="dash",
+        line_dash="dot",
+        line_color="black",
         annotation_text=f"Óptimo: {int(mejor['ss_months'])} meses",
+        annotation_position="top left"
     )
+
+    # Ajustes de diseño
     fig.update_layout(
-        title="Trade-off de costos",
-        xaxis_title="Meses de stock de seguridad",
-        yaxis_title="Costo",
+        template="plotly_white",
         hovermode="x unified",
+        margin=dict(l=20, r=20, t=20, b=20),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5
+        )
     )
+    
+    # Formato de los ejes
+    fig.update_yaxes(title_text="Costo (S/)", secondary_y=False, tickformat=",.0f")
+    fig.update_yaxes(title_text="Fill Rate", secondary_y=True, tickformat=".0%", range=[0, 1.05], showgrid=False)
+    fig.update_xaxes(title_text="Meses de Stock de Seguridad (SS)", tickmode='linear')
+
     return fig
 
 def formatear_comparacion(df_comparacion: pd.DataFrame) -> pd.DataFrame:
