@@ -4,11 +4,10 @@ import warnings
 from sklearn.linear_model import LinearRegression
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
-from sklearn.metrics import mean_squared_error  # Agregado para la Validación Cruzada
+from sklearn.metrics import mean_squared_error
 
 warnings.filterwarnings("ignore")
 
-# Se eliminó SARIMA de la lista
 METODOS_PRONOSTICO = [
     "Naive",
     "Promedio móvil",
@@ -56,16 +55,12 @@ def forecast_promedio_movil(serie: np.ndarray, pasos_futuros: int = 0, ventana: 
         valor = float(np.mean(ultimos)) if ultimos else 0.0
         futuros.append(valor)
         historial_extendido.append(valor)
-
     return asegurar_prediccion_valida(pred_hist, serie), np.maximum(0, np.array(futuros))
 
 def forecast_regresion(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
     if len(serie) == 0:
         return np.array([]), np.array([])
-        
-    # MEJORA PARA TESIS: Restricción de tamaño de muestra
-    # Si hay menos de 12 meses de datos, una regresión lineal es estadísticamente inestable.
-    # Por lo tanto, el sistema hace un "Fallback" automático a Suavización Exponencial (SES).
+    
     if len(serie) < 12:
         return forecast_ses(serie, pasos_futuros)
 
@@ -78,9 +73,6 @@ def forecast_regresion(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.nd
         x_future = np.arange(len(serie), len(serie) + pasos_futuros).reshape(-1, 1)
         pred_future = modelo.predict(x_future)
         
-        # FRENO DE SEGURIDAD (CAP DE DEMANDA): 
-        # Evita proyecciones agresivas al infinito. La proyección futura nunca 
-        # debe superar el 150% (1.5x) del valor máximo histórico registrado.
         max_historico = np.max(serie)
         limite_superior = max_historico * 1.5 
         pred_future = np.clip(pred_future, a_min=0, a_max=limite_superior)
@@ -103,10 +95,11 @@ def forecast_ses(serie: np.ndarray, pasos_futuros: int = 0, alpha: float = 0.30)
         return forecast_promedio_movil(serie, pasos_futuros)
 
 def forecast_arima(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    if len(serie) < 12:
+    # ESCUDO ANTI-CUELGUES: Si hay muchos ceros, ARIMA entra en bucle infinito. 
+    if len(serie) < 6 or np.count_nonzero(serie) < (len(serie) * 0.4):
         return forecast_ses(serie, pasos_futuros)
     try:
-        modelo = ARIMA(serie, order=(1, 1, 1))
+        modelo = ARIMA(serie, order=(1, 1, 0), enforce_stationarity=False, enforce_invertibility=False)
         ajuste = modelo.fit()
         pred_hist = np.asarray(ajuste.fittedvalues)
         pred_future = np.asarray(ajuste.forecast(pasos_futuros)) if pasos_futuros > 0 else np.array([])
@@ -115,15 +108,9 @@ def forecast_arima(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarra
         return forecast_ses(serie, pasos_futuros)
 
 def forecast_holt_winters(serie: np.ndarray, pasos_futuros: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    if len(serie) < 24:
-        try:
-            modelo = ExponentialSmoothing(serie, trend="add", seasonal=None, initialization_method="estimated")
-            ajuste = modelo.fit(optimized=True)
-            pred_hist = np.asarray(ajuste.fittedvalues)
-            pred_future = np.asarray(ajuste.forecast(pasos_futuros)) if pasos_futuros > 0 else np.array([])
-            return asegurar_prediccion_valida(pred_hist, serie), np.maximum(0, pred_future)
-        except Exception:
-            return forecast_ses(serie, pasos_futuros)
+    # ESCUDO ANTI-CUELGUES: Holt-Winters se cuelga intentando buscar estacionalidad en puros ceros
+    if len(serie) < 18 or np.count_nonzero(serie) < (len(serie) * 0.4):
+        return forecast_ses(serie, pasos_futuros)
     try:
         modelo = ExponentialSmoothing(serie, trend="add", seasonal="add", seasonal_periods=12, initialization_method="estimated")
         ajuste = modelo.fit(optimized=True)
@@ -174,7 +161,6 @@ def aplicar_metodo_pronostico(serie: np.ndarray, metodo: str, pasos_futuros: int
     return forecast_ses(serie, pasos_futuros)
 
 def calcular_errores(y_real, y_pred) -> dict:
-    """Se añadió RMSE para ayudar a la validación cruzada a penalizar grandes desviaciones"""
     y_real = np.asarray(y_real, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     suma_real = y_real.sum()
@@ -246,9 +232,7 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
         sub = sub.sort_values("date").copy()
         serie = sub["demand_real"].to_numpy(dtype=float)
         
-        # --- LÓGICA DE VALIDACIÓN CRUZADA (TRAIN/TEST SPLIT) ---
         n_total = len(serie)
-        # Separamos el 20% final de los datos para prueba (mínimo 2 meses, máximo 6 meses)
         horizonte_test = max(2, min(6, int(n_total * 0.2))) 
         
         if n_total > horizonte_test * 2: 
@@ -264,15 +248,13 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
         filas_producto = []
 
         for metodo in METODOS_PRONOSTICO:
-            # 1. Evaluar el modelo usando SOLO los datos de entrenamiento para predecir el test
             if horizonte_test > 0:
                 _, pred_test = aplicar_metodo_pronostico(train, metodo, pasos_futuros=horizonte_test)
-                err = calcular_errores(test, pred_test) # Medimos error sobre datos OCULTOS (futuro real)
+                err = calcular_errores(test, pred_test) 
             else:
                 pred_hist_full, _ = aplicar_metodo_pronostico(serie, metodo, 0)
                 err = calcular_errores(serie, pred_hist_full)
 
-            # 2. Una vez evaluado, entrenamos con TODA la historia para la proyección final
             pred_hist, pred_future = aplicar_metodo_pronostico(serie, metodo, pasos_futuros)
             
             predicciones_hist[metodo] = pred_hist
@@ -285,12 +267,11 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
                 "Bias": err["Bias"],
                 "Abs_Bias": abs(err["Bias"]),
                 "MAE": err["MAE"],
-                "RMSE": err["RMSE"] # Nuevo criterio
+                "RMSE": err["RMSE"] 
             }
             comparacion.append(fila)
             filas_producto.append(fila)
 
-        # 3. Escoger al ganador evaluando wMAPE y, en caso de empate, el menor RMSE
         comp_producto = pd.DataFrame(filas_producto)
         mejor_fila = comp_producto.sort_values(["wMAPE", "RMSE", "Abs_Bias"]).iloc[0]
         mejor_metodo = mejor_fila["Método"]
@@ -328,6 +309,6 @@ def generar_forecast_mejor_por_producto(df: pd.DataFrame, fecha_fin_pronostico=N
 
     df_comparacion = df_comparacion.merge(mejores, on="Producto", how="left")
     df_comparacion["Es mejor"] = df_comparacion["Método"] == df_comparacion["Mejor método"]
-    df_comparacion = df_comparacion.drop(columns=["Abs_Bias", "RMSE"]) # Ocultamos el RMSE en la vista final para no alterar tus tablas visuales
+    df_comparacion = df_comparacion.drop(columns=["Abs_Bias", "RMSE"]) 
 
     return pd.concat(forecasts_finales, ignore_index=True), df_comparacion
