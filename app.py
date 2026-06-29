@@ -8,7 +8,8 @@ import streamlit as st
 # =========================================================
 from datos import generar_demanda_sintetica, leer_archivo_subido
 from generar_pronosticos import METODOS_PRONOSTICO, generar_forecast, generar_forecast_mejor_por_producto
-from simulacion_inventario import ParametrosInventario, simular_producto, calcular_kpis, optimizar_stock_seguridad
+# IMPORTANTE: Aquí agregamos 'obtener_parametros_producto' a la importación
+from simulacion_inventario import ParametrosInventario, simular_producto, calcular_kpis, optimizar_stock_seguridad, obtener_parametros_producto
 from visualizacion import grafico_forecast, grafico_inventario, grafico_tradeoff, formatear_comparacion
 
 warnings.filterwarnings("ignore")
@@ -30,7 +31,7 @@ st.caption(
 # =========================================================
 # SIDEBAR
 # =========================================================
-st.sidebar.header("1. Carga de datos")
+st.sidebar.header("1. Carga de datos de Demanda")
 modo_datos = st.sidebar.radio("Modo de datos", ["Generar datos sintéticos", "Subir CSV/Excel"])
 
 if modo_datos == "Generar datos sintéticos":
@@ -39,7 +40,7 @@ if modo_datos == "Generar datos sintéticos":
     seed = st.sidebar.number_input("Semilla", min_value=1, max_value=9999, value=42)
     df_real = generar_demanda_sintetica(n_productos=n_productos, meses=meses, seed=seed)
 else:
-    archivo = st.sidebar.file_uploader("Sube tu archivo", type=["csv", "xlsx", "xls"])
+    archivo = st.sidebar.file_uploader("Sube tu archivo de Demanda", type=["csv", "xlsx", "xls"])
     if archivo is None:
         st.info(
             "Sube un CSV o Excel con columnas: date, product_id, demand_real. "
@@ -90,9 +91,28 @@ if modo_pronostico == "Automático: mejor método por producto":
 else:
     st.sidebar.info(f"Mejor método para {producto_sel}: {mejor_metodo_producto}")
 
-st.sidebar.header("3. Política de inventario mensual")
+# =========================================================
+# NUEVA SECCIÓN: LECTURA DEL MAESTRO DE ARTÍCULOS
+# =========================================================
+st.sidebar.header("3. Parámetros de Inventario")
+archivo_params = st.sidebar.file_uploader("Sube el Excel Maestro de Artículos (Costos, Lead Times, etc.)", type=["csv", "xlsx", "xls"])
+
+if archivo_params is None:
+    st.warning("⚠️ Por favor, sube el Excel con los parámetros (GRUPO DE DEMANDA, initial_stock, costos, etc.) para realizar la simulación.")
+    st.stop()
+
+# Leer el excel de parámetros
+try:
+    df_parametros = pd.read_excel(archivo_params)
+except Exception as e:
+    try:
+        df_parametros = pd.read_csv(archivo_params)
+    except:
+        st.error("Error al leer el archivo de parámetros. Asegúrate de que sea Excel o CSV.")
+        st.stop()
+
 politica = st.sidebar.selectbox(
-    "Política",
+    "Política de Inventario",
     [
         "RS - revisión periódica",
         "sS - punto de reorden y nivel máximo",
@@ -100,39 +120,21 @@ politica = st.sidebar.selectbox(
     ],
 )
 
-initial_stock = st.sidebar.number_input("Stock inicial", min_value=0, value=1000, step=100)
-lead_time_months = st.sidebar.number_input("Lead time / tiempo de entrega (meses)", min_value=1, value=1, step=1)
-review_period_months = st.sidebar.number_input("Periodo de revisión R (meses)", min_value=1, value=1, step=1)
-ss_months = st.sidebar.number_input("Stock de seguridad inicial (meses)", min_value=0, value=1, step=1)
-q_fixed = st.sidebar.number_input("Cantidad fija Q", min_value=1, value=1000, step=100)
-lot_size = st.sidebar.number_input("Tamaño de lote / empaque", min_value=1, value=1, step=1)
-
-st.sidebar.header("4. Costos")
-cost_order = st.sidebar.number_input("Costo por orden", min_value=0.0, value=200.0, step=10.0)
-cost_holding_month = st.sidebar.number_input("Costo mensual de mantener 1 unidad", min_value=0.0, value=1.5, step=0.5)
-cost_stockout = st.sidebar.number_input("Costo por unidad perdida", min_value=0.0, value=500.0, step=10.0)
 ss_max = st.sidebar.slider("Máximo SS para optimizar (meses)", 1, 24, 6)
 
-parametros = ParametrosInventario(
-    initial_stock=int(initial_stock),
-    lead_time_months=int(lead_time_months),
-    review_period_months=int(review_period_months),
-    ss_months=int(ss_months),
-    q_fixed=int(q_fixed),
-    lot_size=int(lot_size),
-    cost_order=float(cost_order),
-    cost_holding_month=float(cost_holding_month),
-    cost_stockout=float(cost_stockout),
-)
+# Llamamos a la función mágica que extrae los datos específicos de este producto
+parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
 
 # =========================================================
 # CONTENIDO PRINCIPAL
 # =========================================================
 sub_forecast = df_forecast[df_forecast["product_id"] == producto_sel].copy()
 metodo_usado = sub_forecast["method_used"].iloc[0]
-sub_sim = simular_producto(sub_forecast, politica, parametros)
-kpis = calcular_kpis(sub_sim, parametros)
-sub_opt = optimizar_stock_seguridad(sub_forecast, politica, parametros, ss_max=ss_max)
+
+# Le pasamos los parámetros dinámicos a la simulación
+sub_sim = simular_producto(sub_forecast, politica, parametros_del_producto)
+kpis = calcular_kpis(sub_sim, parametros_del_producto)
+sub_opt = optimizar_stock_seguridad(sub_forecast, politica, parametros_del_producto, ss_max=ss_max)
 mejor = sub_opt.loc[sub_opt["total_cost"].idxmin()]
 
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -155,8 +157,8 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.subheader("Mejor método de pronóstico por producto")
     st.write(
-        "La app compara Naive, Promedio móvil, SES, Regresión lineal, ARIMA, SARIMA, Holt-Winters y Croston para cada producto. "
-        "El mejor método se elige por menor wMAPE. Si hay empate, se toma el Bias más cercano a cero y luego el MAE más bajo."
+        "La app compara Naive, Promedio móvil, SES, Regresión lineal, ARIMA, Holt-Winters y Croston para cada producto. "
+        "El mejor método se elige por menor wMAPE. Si hay empate, se toma el RMSE y luego el Bias más cercano a cero."
     )
 
     resumen_mejores = (
