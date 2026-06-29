@@ -16,12 +16,12 @@ class ParametrosInventario:
 
 def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> ParametrosInventario:
     """
-    Busca el producto en la hoja Datos y extrae sus parámetros de inventario.
+    Busca el producto seleccionado en la hoja Datos y extrae sus parámetros.
     """
 
     df = df_params.copy()
 
-    # Normalizar columnas
+    # Normalizar nombres de columnas
     df.columns = [str(c).strip().lower() for c in df.columns]
 
     alias = {
@@ -53,15 +53,20 @@ def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> Pa
     if "product_id" not in df.columns:
         raise ValueError("La hoja Datos debe tener una columna llamada product_id.")
 
-    df["product_id_limpio"] = df["product_id"].astype(str).str.strip().str.upper()
-    producto_limpio = str(producto_id).strip().upper()
+    def limpiar_texto(x):
+        return " ".join(str(x).replace("\xa0", " ").strip().upper().split())
+
+    df["product_id_limpio"] = df["product_id"].apply(limpiar_texto)
+    producto_limpio = limpiar_texto(producto_id)
 
     df_filtrado = df[df["product_id_limpio"] == producto_limpio]
 
     if df_filtrado.empty:
+        productos_disponibles = df["product_id"].astype(str).head(10).tolist()
         raise ValueError(
-            f"No se encontró el producto '{producto_id}' en la hoja Datos. "
-            "Verifica que el product_id coincida exactamente entre las hojas Demanda y Datos."
+            f"No se encontró el producto seleccionado en la hoja Datos: {producto_id}. "
+            f"Revisa que el product_id coincida exactamente entre Demanda y Datos. "
+            f"Primeros product_id en Datos: {productos_disponibles}"
         )
 
     fila = df_filtrado.iloc[0]
