@@ -287,19 +287,13 @@ with tab1:
 
 with tab2:
     st.subheader("📊 Análisis de Demanda y Proyección")
-    st.write("Visualización del comportamiento histórico frente al modelo de pronóstico seleccionado.")
+    st.write(f"Visualización del comportamiento histórico frente al modelo seleccionado: **{metodo_usado}**.")
 
-    # Ajuste de Layout: Gráfico a la izquierda, métricas a la derecha
     col_g1, col_g2 = st.columns([3, 1])
     
     with col_g1:
-        # Gráfico mejorado usando Plotly con áreas sombreadas
+        # Cargamos la figura desde visualizacion.py (que ya tiene el diseño corregido)
         fig = grafico_forecast(sub_forecast)
-        fig.update_layout(
-            template="plotly_white",
-            margin=dict(l=20, r=20, t=40, b=20),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
         st.plotly_chart(fig, use_container_width=True)
 
     with col_g2:
@@ -321,7 +315,6 @@ with tab2:
     # Tabla interactiva con formato condicional
     df_comp = formatear_comparacion(sub_comparacion_producto)
     
-    # Aplicar estilo: resaltar la fila que dice "✅ Mejor"
     def highlight_best(row):
         return ['background-color: #d4edda' if '✅' in str(val) else '' for val in row]
     
