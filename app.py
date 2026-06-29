@@ -173,49 +173,118 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 with tab1:
-    st.subheader("Mejor método de pronóstico por producto")
+    st.subheader("🏆 Análisis Estratégico: Mejor Método por Producto")
     st.write(
-        "La app compara Naive, Promedio móvil, SES, Regresión lineal, ARIMA, Holt-Winters y Croston para cada producto. "
-        "El mejor método se elige por menor wMAPE en Validación Cruzada. Si hay empate, se toma el RMSE y luego el Bias."
+        "El framework evalúa todos los modelos mediante Validación Cruzada y selecciona el ganador "
+        "basado en el menor wMAPE, utilizando el RMSE y el Bias como criterios de desempate."
     )
 
+    # Preparar el dataframe de los ganadores
     resumen_mejores = (
         df_comparacion[df_comparacion["Es mejor"]]
         .copy()
         .sort_values("Producto")
     )
-
     resumen_mejores = resumen_mejores[["Producto", "Método", "wMAPE", "Bias", "MAE"]].rename(
         columns={"Método": "Mejor método"}
     )
 
-    resumen_mostrar = resumen_mejores.copy()
-    resumen_mostrar["wMAPE"] = resumen_mostrar["wMAPE"].map(lambda x: f"{x:.2%}")
-    resumen_mostrar["Bias"] = resumen_mostrar["Bias"].map(lambda x: f"{x:.2%}")
-    resumen_mostrar["MAE"] = resumen_mostrar["MAE"].map(lambda x: f"{x:,.2f}")
+    # ==========================================
+    # 1. RESUMEN DEL PORTAFOLIO (DONUT CHART)
+    # ==========================================
+    col_graf, col_tabla = st.columns([1.2, 1])
 
-    st.dataframe(resumen_mostrar, use_container_width=True, hide_index=True)
+    # Contar cuántos productos ganaron con cada método
+    conteo_metodos = resumen_mejores["Mejor método"].value_counts().reset_index()
+    conteo_metodos.columns = ["Método", "Cantidad de Productos"]
+    conteo_metodos["Porcentaje"] = (conteo_metodos["Cantidad de Productos"] / len(resumen_mejores)) * 100
 
-    fig_best = px.bar(
-        resumen_mejores,
-        x="Producto",
-        y="wMAPE",
-        color="Mejor método",
-        text="Mejor método",
-        title="Método ganador por producto según menor wMAPE",
-        labels={"wMAPE": "wMAPE", "Producto": "Producto"},
+    with col_graf:
+        fig_donut = px.pie(
+            conteo_metodos, 
+            names="Método", 
+            values="Cantidad de Productos", 
+            hole=0.45,
+            title="Distribución de Métodos Ganadores",
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig_donut.update_traces(textposition='inside', textinfo='percent+label')
+        fig_donut.update_layout(margin=dict(t=40, b=0, l=0, r=0))
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    with col_tabla:
+        st.write("<br>", unsafe_allow_html=True) # Espacio para centrar verticalmente
+        st.markdown("**Resumen de Asignación de Modelos**")
+        st.dataframe(
+            conteo_metodos,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Cantidad de Productos": st.column_config.ProgressColumn(
+                    "Cantidad",
+                    format="%d",
+                    min_value=0,
+                    max_value=int(conteo_metodos["Cantidad de Productos"].max())
+                ),
+                "Porcentaje": st.column_config.NumberColumn(
+                    "% del Portafolio",
+                    format="%.1f %%"
+                )
+            }
+        )
+
+    st.divider()
+
+    # ==========================================
+    # 2. DETALLE INTERACTIVO POR PRODUCTO
+    # ==========================================
+    st.subheader("🔎 Detalle por Producto")
+    
+    # Filtro interactivo
+    metodos_disponibles = conteo_metodos["Método"].tolist()
+    filtro_metodos = st.multiselect(
+        "Filtra la tabla por Método Ganador:", 
+        options=metodos_disponibles, 
+        default=metodos_disponibles
     )
-    fig_best.update_yaxes(tickformat=".0%")
-    st.plotly_chart(fig_best, use_container_width=True)
 
+    # Aplicar el filtro y formatear los números a porcentajes (x100) para visualización
+    df_mostrar = resumen_mejores[resumen_mejores["Mejor método"].isin(filtro_metodos)].copy()
+    df_mostrar["wMAPE"] = df_mostrar["wMAPE"] * 100
+    df_mostrar["Bias"] = df_mostrar["Bias"] * 100
+
+    # Mostrar la tabla estilizada
+    st.dataframe(
+        df_mostrar,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "wMAPE": st.column_config.NumberColumn(
+                "wMAPE (%)",
+                help="Error Porcentual Absoluto Medio Ponderado",
+                format="%.2f %%"
+            ),
+            "Bias": st.column_config.NumberColumn(
+                "Bias (%)",
+                help="Sesgo del pronóstico (Positivo = Sobrepronóstico, Negativo = Subpronóstico)",
+                format="%.2f %%"
+            ),
+            "MAE": st.column_config.NumberColumn(
+                "MAE (Unidades)",
+                format="%.2f"
+            )
+        }
+    )
+
+    st.write("<br>", unsafe_allow_html=True)
     csv_mejores = resumen_mejores.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="Descargar mejores métodos en CSV",
+        label="📥 Descargar detalle completo en CSV",
         data=csv_mejores,
         file_name="mejor_metodo_por_producto.csv",
         mime="text/csv",
     )
-
+    
 with tab2:
     st.subheader("Pronóstico mensual de demanda")
     st.write(
