@@ -17,8 +17,15 @@ class ParametrosInventario:
 def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> ParametrosInventario:
     """
     Busca el producto en el dataframe maestro de parámetros y extrae sus valores específicos.
-    Si el producto no existe en el Excel, devuelve valores por defecto para evitar que la app se caiga.
     """
+    # 🔴 SOLUCIÓN PANTALLA BLANCA: Si la tabla está vacía (ej. modo sintético), devuelve valores por defecto y sale.
+    if df_params is None or df_params.empty:
+        return ParametrosInventario(
+            initial_stock=0, lead_time_months=1, review_period_months=1,
+            ss_months=1, q_fixed=100, lot_size=1,
+            cost_order=100.0, cost_holding_month=1.0, cost_stockout=100.0
+        )
+
     # Estandarizar nombre de la columna principal por si viene con espacios
     df_params = df_params.copy()
     columna_producto = "GRUPO DE DEMANDA" if "GRUPO DE DEMANDA" in df_params.columns else df_params.columns[0]
@@ -27,7 +34,7 @@ def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> Pa
     df_filtrado = df_params[df_params[columna_producto].astype(str).str.strip() == str(producto_id).strip()]
 
     if df_filtrado.empty:
-        # Valores por defecto si no se encuentra el producto en la tabla
+        # Valores por defecto si no se encuentra el producto específico en la tabla
         return ParametrosInventario(
             initial_stock=0, lead_time_months=1, review_period_months=1,
             ss_months=1, q_fixed=100, lot_size=1,
@@ -37,11 +44,9 @@ def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> Pa
     # Extraer la primera fila coincidente
     fila = df_filtrado.iloc[0]
 
-    # Mapear los valores de las columnas del Excel a la Dataclass
-    # Usamos .get() y pd.to_numeric() para evitar errores si una columna está vacía o falta
+    # Mapear los valores
     return ParametrosInventario(
         initial_stock=int(pd.to_numeric(fila.get("initial_stock", 0))),
-        # En la imagen la columna dice "lead_time_mo..." (puede estar cortada, asumimos "lead_time_mo")
         lead_time_months=int(math.ceil(pd.to_numeric(fila.get("lead_time_mo", fila.get("lead_time_months", 1))))),
         review_period_months=int(pd.to_numeric(fila.get("review_period", 1))),
         ss_months=int(pd.to_numeric(fila.get("ss_months", 0))),
@@ -51,7 +56,7 @@ def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> Pa
         cost_holding_month=float(pd.to_numeric(fila.get("cost_holding_month", fila.get("cost_holding_r", 0.0)))),
         cost_stockout=float(pd.to_numeric(fila.get("cost_stockout", 0.0)))
     )
-
+    
 def redondear_lote(cantidad: float, lote: int) -> int:
     if cantidad <= 0:
         return 0
