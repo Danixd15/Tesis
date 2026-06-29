@@ -7,7 +7,7 @@ class ParametrosInventario:
     initial_stock: int
     lead_time_months: int
     review_period_months: int
-    ss_months: int
+    ss_months: float
     q_fixed: int
     lot_size: int
     cost_order: float
@@ -16,42 +16,89 @@ class ParametrosInventario:
 
 def obtener_parametros_producto(df_params: pd.DataFrame, producto_id: str) -> ParametrosInventario:
     """
-    Busca el producto en el dataframe maestro de parámetros y extrae sus valores específicos.
-    Si el producto no existe en el Excel, devuelve valores por defecto para evitar que la app se caiga.
+    Busca el producto en la hoja Datos y extrae sus parámetros de inventario.
     """
-    # Estandarizar nombre de la columna principal por si viene con espacios
-    df_params = df_params.copy()
-    columna_producto = "GRUPO DE DEMANDA" if "GRUPO DE DEMANDA" in df_params.columns else df_params.columns[0]
-    
-    # Filtrar el dataframe por el producto seleccionado
-    df_filtrado = df_params[df_params[columna_producto].astype(str).str.strip() == str(producto_id).strip()]
+
+    df = df_params.copy()
+
+    # Normalizar columnas
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    alias = {
+        "grupo de demanda": "product_id",
+        "producto": "product_id",
+        "sku": "product_id",
+
+        "lead_time_months": "lead_time_mo",
+        "lead time months": "lead_time_mo",
+        "lead time mo": "lead_time_mo",
+
+        "review_period_months": "review_period",
+        "review period": "review_period",
+
+        "moq": "q_fixed",
+        "moq estándar": "q_fixed",
+        "moq estandar": "q_fixed",
+
+        "cost_holding": "cost_holding_month",
+        "cost_holding_r": "cost_holding_month",
+        "costo_mantener": "cost_holding_month",
+
+        "cost_stockout": "cost_stockout",
+        "costo_quiebre": "cost_stockout",
+    }
+
+    df = df.rename(columns={c: alias.get(c, c) for c in df.columns})
+
+    if "product_id" not in df.columns:
+        raise ValueError("La hoja Datos debe tener una columna llamada product_id.")
+
+    df["product_id_limpio"] = df["product_id"].astype(str).str.strip().str.upper()
+    producto_limpio = str(producto_id).strip().upper()
+
+    df_filtrado = df[df["product_id_limpio"] == producto_limpio]
 
     if df_filtrado.empty:
-        # Valores por defecto si no se encuentra el producto en la tabla
-        return ParametrosInventario(
-            initial_stock=0, lead_time_months=1, review_period_months=1,
-            ss_months=1, q_fixed=100, lot_size=1,
-            cost_order=100.0, cost_holding_month=1.0, cost_stockout=100.0
+        raise ValueError(
+            f"No se encontró el producto '{producto_id}' en la hoja Datos. "
+            "Verifica que el product_id coincida exactamente entre las hojas Demanda y Datos."
         )
-    
-    # Extraer la primera fila coincidente
+
     fila = df_filtrado.iloc[0]
 
-    # Mapear los valores de las columnas del Excel a la Dataclass
-    # Usamos .get() y pd.to_numeric() para evitar errores si una columna está vacía o falta
-    return ParametrosInventario(
-        initial_stock=int(pd.to_numeric(fila.get("initial_stock", 0))),
-        # En la imagen la columna dice "lead_time_mo..." (puede estar cortada, asumimos "lead_time_mo")
-        lead_time_months=int(math.ceil(pd.to_numeric(fila.get("lead_time_mo", fila.get("lead_time_months", 1))))),
-        review_period_months=int(pd.to_numeric(fila.get("review_period", 1))),
-        ss_months=int(pd.to_numeric(fila.get("ss_months", 0))),
-        q_fixed=int(pd.to_numeric(fila.get("q_fixed", 100))),
-        lot_size=int(pd.to_numeric(fila.get("lot_size", 1))),
-        cost_order=float(pd.to_numeric(fila.get("cost_order", 0.0))),
-        cost_holding_month=float(pd.to_numeric(fila.get("cost_holding_month", fila.get("cost_holding_r", 0.0)))),
-        cost_stockout=float(pd.to_numeric(fila.get("cost_stockout", 0.0)))
-    )
+    def numero(columna, default=0):
+        valor = pd.to_numeric(fila.get(columna, default), errors="coerce")
+        if pd.isna(valor):
+            return default
+        return valor
 
+    initial_stock = int(numero("initial_stock", 0))
+    lead_time_months = int(math.ceil(numero("lead_time_mo", 1)))
+    review_period_months = int(numero("review_period", 1))
+    ss_months = float(numero("ss_months", 0))
+    q_fixed = int(numero("q_fixed", 100))
+    lot_size = int(numero("lot_size", 1))
+    cost_order = float(numero("cost_order", 0))
+    cost_holding_month = float(numero("cost_holding_month", 0))
+    cost_stockout = float(numero("cost_stockout", 0))
+
+    lead_time_months = max(1, lead_time_months)
+    review_period_months = max(1, review_period_months)
+    q_fixed = max(1, q_fixed)
+    lot_size = max(1, lot_size)
+
+    return ParametrosInventario(
+        initial_stock=initial_stock,
+        lead_time_months=lead_time_months,
+        review_period_months=review_period_months,
+        ss_months=ss_months,
+        q_fixed=q_fixed,
+        lot_size=lot_size,
+        cost_order=cost_order,
+        cost_holding_month=cost_holding_month,
+        cost_stockout=cost_stockout,
+    )
+    
 def redondear_lote(cantidad: float, lote: int) -> int:
     if cantidad <= 0:
         return 0
@@ -91,7 +138,7 @@ def simular_producto(df_producto: pd.DataFrame, politica: str, p: ParametrosInve
             mes_llegada = t + p.lead_time_months
             pipeline[mes_llegada] = pipeline.get(mes_llegada, 0) + orden
 
-        demanda_real = float(fila["demand_real"])
+        demanda_real = float(fila.get("demand_forecast", fila["demand_real"]))
         venta_real = min(stock_fisico, demanda_real)
         venta_perdida = max(0, demanda_real - stock_fisico)
         stock_fisico -= venta_real
