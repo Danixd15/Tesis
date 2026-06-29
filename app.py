@@ -166,9 +166,23 @@ politica = st.sidebar.selectbox(
 
 ss_max = st.sidebar.slider("Máximo SS para optimizar (meses)", 1, 24, 6)
 
-# Llamamos a la función mágica que extrae los datos específicos de este producto
-parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
+try:
+    parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
+except Exception as e:
+    st.error("No se pudieron obtener los parámetros del producto seleccionado.")
+    st.write("Producto seleccionado en Demanda:")
+    st.code(producto_sel)
 
+    st.write("Columnas encontradas en la hoja Datos:")
+    st.write(list(df_parametros.columns))
+
+    if "product_id" in df_parametros.columns:
+        st.write("Primeros productos encontrados en la hoja Datos:")
+        st.dataframe(df_parametros[["product_id"]].head(20), use_container_width=True)
+
+    st.exception(e)
+    st.stop()
+    
 # =========================================================
 # CONTENIDO PRINCIPAL
 # =========================================================
