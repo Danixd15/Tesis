@@ -11,41 +11,57 @@ def grafico_forecast(df_producto: pd.DataFrame) -> go.Figure:
     df_future = df_producto[df_producto.get("tipo_periodo", "Histórico") == "Pronóstico futuro"].copy()
 
     fig = go.Figure()
+    
+    # Línea histórica
     fig.add_trace(
         go.Scatter(
             x=df_hist["date"],
             y=df_hist["demand_real"],
             mode="lines+markers",
-            name="Demanda real mensual histórica",
+            name="Demanda real",
+            line=dict(color="#1f77b4", width=2)
         )
     )
+    
+    # Línea de ajuste (entrenamiento)
     fig.add_trace(
         go.Scatter(
             x=df_hist["date"],
             y=df_hist["demand_forecast"],
             mode="lines+markers",
-            name=f"Ajuste del pronóstico ({metodo})",
+            name=f"Ajuste ({metodo})",
+            line=dict(color="#ff7f0e", width=2, dash="dot")
         )
     )
 
+    # Línea de pronóstico futuro
     if not df_future.empty:
         fig.add_trace(
             go.Scatter(
                 x=df_future["date"],
                 y=df_future["demand_forecast"],
                 mode="lines+markers",
-                name=f"Pronóstico futuro ({metodo})",
-                line={"dash": "dash"},
+                name="Pronóstico futuro",
+                line=dict(color="#2ca02c", width=3, dash="dash")
             )
         )
 
+    # Ajustes de diseño para evitar choques visuales
     fig.update_layout(
-        title=f"Demanda mensual histórica y pronóstico futuro - Método usado: {metodo}",
         xaxis_title="Mes",
         yaxis_title="Unidades",
         hovermode="x unified",
+        margin=dict(l=20, r=20, t=20, b=20), # Márgenes reducidos
+        legend=dict(
+            orientation="h",   # Leyenda horizontal
+            yanchor="top",     # Anclada desde arriba
+            y=-0.15,           # Posicionada DEBAJO del eje X (evita chocar con la gráfica)
+            xanchor="center",  # Centrada horizontalmente
+            x=0.5
+        )
     )
     return fig
+
 
 def grafico_inventario(df_sim: pd.DataFrame) -> go.Figure:
     fig = make_subplots(specs=[[{"secondary_y": True}]])
