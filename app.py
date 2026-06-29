@@ -6,9 +6,9 @@ import streamlit as st
 # =========================================================
 # IMPORTACIÓN DE MÓDULOS LOCALES
 # =========================================================
-from datos import generar_demanda_sintetica, leer_archivo_subido
+# Cambiamos leer_archivo_subido por convertir_a_mensual ya que procesaremos el Excel aquí
+from datos import generar_demanda_sintetica, convertir_a_mensual 
 from generar_pronosticos import METODOS_PRONOSTICO, generar_forecast, generar_forecast_mejor_por_producto
-# IMPORTANTE: Aquí agregamos 'obtener_parametros_producto' a la importación
 from simulacion_inventario import ParametrosInventario, simular_producto, calcular_kpis, optimizar_stock_seguridad, obtener_parametros_producto
 from visualizacion import grafico_forecast, grafico_inventario, grafico_tradeoff, formatear_comparacion
 
@@ -29,31 +29,63 @@ st.caption(
 )
 
 # =========================================================
-# SIDEBAR
+# SIDEBAR - CARGA DE DATOS ÚNICA
 # =========================================================
-st.sidebar.header("1. Carga de datos de Demanda")
-modo_datos = st.sidebar.radio("Modo de datos", ["Generar datos sintéticos", "Subir CSV/Excel"])
+st.sidebar.header("1. Carga de datos")
+modo_datos = st.sidebar.radio("Modo de datos", ["Generar datos sintéticos", "Subir Excel (Pestañas: Demanda y Datos)"])
 
 if modo_datos == "Generar datos sintéticos":
     n_productos = st.sidebar.slider("Número de productos", 1, 50, 5)
     meses = st.sidebar.slider("Meses de historial", 12, 84, 36)
     seed = st.sidebar.number_input("Semilla", min_value=1, max_value=9999, value=42)
     df_real = generar_demanda_sintetica(n_productos=n_productos, meses=meses, seed=seed)
+    df_parametros = pd.DataFrame() # Creamos un df vacío para que use los parámetros por defecto
 else:
-    archivo = st.sidebar.file_uploader("Sube tu archivo de Demanda", type=["csv", "xlsx", "xls"])
+    archivo = st.sidebar.file_uploader("Sube tu archivo Excel unificado", type=["xlsx", "xls"])
     if archivo is None:
         st.info(
-            "Sube un CSV o Excel con columnas: date, product_id, demand_real. "
-            "Si tus datos son diarios, la app los agrupará por mes."
+            "Sube un archivo Excel que contenga dos pestañas:\n"
+            "1. 'Demanda': Con el historial (date, product_id, demand_real)\n"
+            "2. 'Datos': Con el maestro de artículos (GRUPO DE DEMANDA, lead_time, etc.)"
         )
         st.stop()
 
     try:
-        df_real = leer_archivo_subido(archivo)
+        # 1. Leer el libro de Excel completo
+        xls = pd.ExcelFile(archivo)
+        
+        # 2. Extraer y procesar la pestaña "Demanda"
+        if "Demanda" in xls.sheet_names:
+            df_demanda_raw = pd.read_excel(xls, sheet_name="Demanda")
+        else:
+            df_demanda_raw = pd.read_excel(xls, sheet_name=0) # Si no se llama Demanda, toma la primera hoja
+            
+        # Normalizamos las columnas de la demanda para evitar errores tipográficos
+        df_demanda_raw.columns = [str(c).strip().lower() for c in df_demanda_raw.columns]
+        alias = {
+            "fecha": "date", "mes": "date", "periodo": "date", "día": "date", "dia": "date",
+            "producto": "product_id", "sku": "product_id", "id_producto": "product_id", "codigo": "product_id", "código": "product_id",
+            "demanda": "demand_real", "venta": "demand_real", "ventas": "demand_real", "cantidad": "demand_real", "unidades": "demand_real",
+        }
+        df_demanda_raw = df_demanda_raw.rename(columns={c: alias.get(c, c) for c in df_demanda_raw.columns})
+        
+        # Pasamos los datos limpios a la función que los agrupa por mes
+        df_real = convertir_a_mensual(df_demanda_raw)
+
+        # 3. Extraer la pestaña "Datos" (Maestro de Artículos)
+        if "Datos" in xls.sheet_names:
+            df_parametros = pd.read_excel(xls, sheet_name="Datos")
+        else:
+            st.error("⚠️ El archivo Excel no tiene una pestaña llamada 'Datos'. Por favor, agrégala y vuelve a subir el archivo.")
+            st.stop()
+
     except Exception as e:
-        st.error(str(e))
+        st.error(f"Error procesando el archivo: {str(e)}")
         st.stop()
 
+# =========================================================
+# PRONÓSTICO MENSUAL
+# =========================================================
 st.sidebar.header("2. Pronóstico mensual")
 modo_pronostico = st.sidebar.selectbox(
     "Selección del método",
@@ -92,71 +124,12 @@ else:
     st.sidebar.info(f"Mejor método para {producto_sel}: {mejor_metodo_producto}")
 
 # =========================================================
-# NUEVA SECCIÓN: LECTURA DEL MAESTRO DE ARTÍCULOS
+# POLÍTICA DE INVENTARIO
 # =========================================================
-st.sidebar.header("1. Carga de datos")
-modo_datos = st.sidebar.radio("Modo de datos", ["Generar datos sintéticos", "Subir Excel"])
-
-df_parametros = None
-
-if modo_datos == "Generar datos sintéticos":
-    n_productos = st.sidebar.slider("Número de productos", 1, 50, 5)
-    meses = st.sidebar.slider("Meses de historial", 12, 84, 36)
-    seed = st.sidebar.number_input("Semilla", min_value=1, max_value=9999, value=42)
-
-    df_real = generar_demanda_sintetica(
-        n_productos=n_productos,
-        meses=meses,
-        seed=seed
-    )
-
-    # Parámetros por defecto para pruebas con datos sintéticos
-    productos_sinteticos = sorted(df_real["product_id"].unique())
-    df_parametros = pd.DataFrame({
-        "product_id": productos_sinteticos,
-        "initial_stock": 1000,
-        "lead_time_mo": 1,
-        "review_period": 1,
-        "ss_months": 1,
-        "q_fixed": 1000,
-        "lot_size": 1,
-        "cost_order": 200,
-        "cost_holding_month": 1.5,
-        "cost_stockout": 500,
-        "tvu_months": 12,
-        "unit_value": 1,
-    })
-
-else:
-    archivo = st.sidebar.file_uploader(
-        "Sube tu Excel con hojas Demanda y Datos",
-        type=["xlsx", "xls"]
-    )
-
-    if archivo is None:
-        st.info(
-            "Sube un Excel con dos hojas: 'Demanda' y 'Datos'. "
-            "La hoja Demanda debe tener date, product_id y demand_real."
-        )
-        st.stop()
-
-    try:
-        # Leer hoja Demanda usando datos.py
-        df_real = leer_archivo_subido(archivo)
-
-        # Volver al inicio del archivo para leer la segunda hoja
-        archivo.seek(0)
-
-        # Leer hoja Datos para parámetros de inventario
-        df_parametros = pd.read_excel(archivo, sheet_name="Datos")
-
-    except Exception as e:
-        st.error("Error al leer el archivo. Verifica que existan las hojas 'Demanda' y 'Datos'.")
-        st.exception(e)
-        st.stop()
+st.sidebar.header("3. Política de Inventario")
 
 politica = st.sidebar.selectbox(
-    "Política de Inventario",
+    "Política (Modo Simulación)",
     [
         "RS - revisión periódica",
         "sS - punto de reorden y nivel máximo",
@@ -166,42 +139,22 @@ politica = st.sidebar.selectbox(
 
 ss_max = st.sidebar.slider("Máximo SS para optimizar (meses)", 1, 24, 6)
 
-try:
-    parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
-except Exception as e:
-    st.error("No se pudieron obtener los parámetros del producto seleccionado.")
-    st.write("Producto seleccionado en Demanda:")
-    st.code(producto_sel)
+# Extracción automática de parámetros desde la pestaña "Datos"
+parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
 
-    st.write("Columnas encontradas en la hoja Datos:")
-    st.write(list(df_parametros.columns))
-
-    if "product_id" in df_parametros.columns:
-        st.write("Primeros productos encontrados en la hoja Datos:")
-        st.dataframe(df_parametros[["product_id"]].head(20), use_container_width=True)
-
-    st.exception(e)
-    st.stop()
-    
 # =========================================================
 # CONTENIDO PRINCIPAL
 # =========================================================
-
 sub_forecast = df_forecast[df_forecast["product_id"] == producto_sel].copy()
 metodo_usado = sub_forecast["method_used"].iloc[0]
-# Para simulación se usa solo el horizonte futuro
-sub_forecast_sim = sub_forecast[
-    sub_forecast["tipo_periodo"] == "Pronóstico futuro"
-].copy()
-if sub_forecast_sim.empty:
-    st.warning("No hay meses futuros para simular. Selecciona una fecha de pronóstico mayor a la última fecha histórica.")
-    st.stop()
-parametros_del_producto = obtener_parametros_producto(df_parametros, producto_sel)
-sub_sim = simular_producto(sub_forecast_sim, politica, parametros_del_producto)
+
+# Ejecutar simulaciones
+sub_sim = simular_producto(sub_forecast, politica, parametros_del_producto)
 kpis = calcular_kpis(sub_sim, parametros_del_producto)
 sub_opt = optimizar_stock_seguridad(sub_forecast, politica, parametros_del_producto, ss_max=ss_max)
 mejor = sub_opt.loc[sub_opt["total_cost"].idxmin()]
 
+# Tarjetas KPI
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Método usado", metodo_usado)
 col2.metric("Fill rate", f"{kpis['fill_rate']:.2%}")
@@ -223,7 +176,7 @@ with tab1:
     st.subheader("Mejor método de pronóstico por producto")
     st.write(
         "La app compara Naive, Promedio móvil, SES, Regresión lineal, ARIMA, Holt-Winters y Croston para cada producto. "
-        "El mejor método se elige por menor wMAPE. Si hay empate, se toma el RMSE y luego el Bias más cercano a cero."
+        "El mejor método se elige por menor wMAPE en Validación Cruzada. Si hay empate, se toma el RMSE y luego el Bias."
     )
 
     resumen_mejores = (
