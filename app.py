@@ -286,23 +286,51 @@ with tab1:
     )
     
 with tab2:
-    st.subheader("Pronóstico mensual de demanda")
-    st.write(
-        "La demanda se trabaja por mes. Si cargaste datos diarios, el sistema los sumó automáticamente por producto y mes. "
-        "Además, la app proyecta meses futuros hasta la fecha indicada en el menú lateral."
-    )
+    st.subheader("📊 Análisis de Demanda y Proyección")
+    st.write("Visualización del comportamiento histórico frente al modelo de pronóstico seleccionado.")
 
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.plotly_chart(grafico_forecast(sub_forecast), use_container_width=True)
-    with col_b:
-        st.write(f"Comparación de métodos para {producto_sel}")
-        st.dataframe(formatear_comparacion(sub_comparacion_producto), use_container_width=True, hide_index=True)
-        st.success(
-            f"Mejor método para {producto_sel}: {mejor_metodo_producto} "
-            f"con wMAPE {mejor_wmape_producto:.2%}."
+    # Ajuste de Layout: Gráfico a la izquierda, métricas a la derecha
+    col_g1, col_g2 = st.columns([3, 1])
+    
+    with col_g1:
+        # Gráfico mejorado usando Plotly con áreas sombreadas
+        fig = grafico_forecast(sub_forecast)
+        fig.update_layout(
+            template="plotly_white",
+            margin=dict(l=20, r=20, t=40, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
+        st.plotly_chart(fig, use_container_width=True)
 
+    with col_g2:
+        st.markdown("### 🎯 Resumen del Modelo")
+        st.metric("Método Seleccionado", metodo_usado)
+        st.metric("wMAPE (Error)", f"{mejor_wmape_producto:.2%}")
+        
+        st.markdown("---")
+        st.markdown("**Insights clave:**")
+        if mejor_wmape_producto < 0.20:
+            st.success("Modelo de alta precisión. Apto para compras automáticas.")
+        elif mejor_wmape_producto < 0.50:
+            st.warning("Modelo con precisión moderada. Se recomienda revisión manual.")
+        else:
+            st.error("Precisión baja. Posible demanda errática o quiebre de stock.")
+
+    st.markdown("### 📋 Comparativa de Métodos (Validación Cruzada)")
+    
+    # Tabla interactiva con formato condicional
+    df_comp = formatear_comparacion(sub_comparacion_producto)
+    
+    # Aplicar estilo: resaltar la fila que dice "✅ Mejor"
+    def highlight_best(row):
+        return ['background-color: #d4edda' if '✅' in str(val) else '' for val in row]
+    
+    st.dataframe(
+        df_comp.style.apply(highlight_best, axis=1),
+        use_container_width=True,
+        hide_index=True
+    )
+    
 with tab3:
     st.subheader("Simulación mensual de inventario")
     st.plotly_chart(grafico_inventario(sub_sim), use_container_width=True)
