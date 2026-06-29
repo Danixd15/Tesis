@@ -64,7 +64,7 @@ def leer_archivo_subido(uploaded_file) -> pd.DataFrame:
     if nombre.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     elif nombre.endswith(".xlsx") or nombre.endswith(".xls"):
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(uploaded_file, sheet_name="Demanda")
     else:
         raise ValueError("Formato no soportado. Sube un archivo CSV o Excel.")
 
