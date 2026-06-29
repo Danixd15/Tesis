@@ -4,14 +4,18 @@ import pandas as pd
 def convertir_a_mensual(df: pd.DataFrame) -> pd.DataFrame:
     """Convierte cualquier base diaria/semanal/mensual a demanda mensual por producto."""
     df = df.copy()
+    
+    # 1. Asegurar formato de fechas y convertir demandas erróneas o negativas a 0
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["product_id"] = df["product_id"].astype(str)
+    df["product_id"] = df["product_id"].astype(str).str.strip()
     df["demand_real"] = pd.to_numeric(df["demand_real"], errors="coerce").fillna(0)
     df["demand_real"] = df["demand_real"].clip(lower=0)
     df = df.dropna(subset=["date"])
 
+    # 2. Truncar la fecha al primer día del mes (Agrupación temporal)
     df["date"] = df["date"].dt.to_period("M").dt.to_timestamp()
 
+    # 3. Sumar la demanda mensual por producto (Agrupación dimensional)
     df_mensual = (
         df.groupby(["product_id", "date"], as_index=False)["demand_real"]
         .sum()
@@ -56,49 +60,3 @@ def generar_demanda_sintetica(n_productos: int = 5, meses: int = 36, seed: int =
         )
 
     return pd.concat(dataframes, ignore_index=True)
-
-def leer_archivo_subido(uploaded_file) -> pd.DataFrame:
-    """Lee CSV o Excel, normaliza columnas y agrupa la demanda por mes."""
-    nombre = uploaded_file.name.lower()
-
-    if nombre.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    elif nombre.endswith(".xlsx") or nombre.endswith(".xls"):
-        df = pd.read_excel(uploaded_file, sheet_name="Demanda")
-    else:
-        raise ValueError("Formato no soportado. Sube un archivo CSV o Excel.")
-
-    df.columns = [str(c).strip().lower() for c in df.columns]
-
-    alias = {
-        "fecha": "date",
-        "mes": "date",
-        "periodo": "date",
-        "período": "date",
-        "día": "date",
-        "dia": "date",
-        "producto": "product_id",
-        "sku": "product_id",
-        "id_producto": "product_id",
-        "codigo": "product_id",
-        "código": "product_id",
-        "demanda": "demand_real",
-        "venta": "demand_real",
-        "ventas": "demand_real",
-        "cantidad": "demand_real",
-        "unidades": "demand_real",
-    }
-    df = df.rename(columns={c: alias.get(c, c) for c in df.columns})
-
-    columnas_requeridas = ["date", "product_id", "demand_real"]
-    faltantes = [c for c in columnas_requeridas if c not in df.columns]
-    if faltantes:
-        raise ValueError(
-            "Faltan columnas obligatorias: "
-            + ", ".join(faltantes)
-            + ". Usa columnas: date, product_id, demand_real. "
-            + "También puede reconocer nombres como fecha, mes, producto, sku, ventas o demanda."
-        )
-
-    df = df[columnas_requeridas].copy()
-    return convertir_a_mensual(df)
